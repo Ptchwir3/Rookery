@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rookery.fullname" . }}-leader
+  labels:
+    {{- include "rookery.leaderLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rookery.fullname" . }}-leader
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rookery.fullname" . }}-leader
+        app.kubernetes.io/component: leader
+        {{- include "rookery.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.leader.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      # ---------------------------------------------------------------
+      # Init container: download the model if not already present
+      # ---------------------------------------------------------------
+      initContainers:
+        - name: model-downloader
+          image: "{{ .Values.downloader.image.repository }}:{{ .Values.downloader.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              MODEL_PATH="/models/{{ include "rookery.modelFilename" . }}"
+              if [ -f "$MODEL_PATH" ]; then
+                echo "[rookery] Model already exists at $MODEL_PATH, skipping download"
+                ls -lh "$MODEL_PATH"
+              else
+                echo "[rookery] Downloading model..."
+                echo "[rookery] URL: {{ .Values.model.url }}"
+                echo "[rookery] Destination: $MODEL_PATH"
+                wget {{ .Values.downloader.extraFlags }} \
+                  -O "$MODEL_PATH.tmp" \
+                  "{{ .Values.model.url }}" \
+                  && mv "$MODEL_PATH.tmp" "$MODEL_PATH" \
+                  || { echo "[rookery] ERROR: Download failed"; rm -f "$MODEL_PATH.tmp"; exit 1; }
+                echo "[rookery] Download complete"
+                ls -lh "$MODEL_PATH"
+              fi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+        # ---------------------------------------------------------------
+        # Init container: wait for at least one worker to be ready
+        # ---------------------------------------------------------------
+        - name: wait-for-workers
+          image: "{{ .Values.downloader.image.repository }}:{{ .Values.downloader.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              WORKER_SVC="{{ include "rookery.fullname" . }}-worker.{{ .Release.Namespace }}.svc.cluster.local"
+              echo "[rookery] Waiting for workers at $WORKER_SVC ..."
+              ATTEMPTS=0
+              MAX_ATTEMPTS=60
+              while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                # nslookup returns individual pod IPs for headless service
+                WORKERS=$(nslookup "$WORKER_SVC" 2>/dev/null | grep -c "Address:")
+                # Subtract 1 for the DNS server address line
+                WORKERS=$((WORKERS - 1))
+                if [ "$WORKERS" -gt 0 ]; then
+                  echo "[rookery] Found $WORKERS worker(s) ready"
+                  exit 0
+                fi
+                ATTEMPTS=$((ATTEMPTS + 1))
+                echo "[rookery] No workers found yet (attempt $ATTEMPTS/$MAX_ATTEMPTS)..."
+                sleep 5
+              done
+              echo "[rookery] WARNING: No workers found after ${MAX_ATTEMPTS} attempts, starting anyway (local-only mode)"
+              exit 0
+      # ---------------------------------------------------------------
+      # Main container: llama-server
+      # ---------------------------------------------------------------
+      containers:
+        - name: leader
+          image: "{{ .Values.leader.image.repository }}:{{ .Values.leader.image.tag }}"
+          imagePullPolicy: {{ .Values.leader.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.leader.service.port }}
+              protocol: TCP
+          env:
+            - name: ROOKERY_MODEL
+              value: "/models/{{ include "rookery.modelFilename" . }}"
+            - name: ROOKERY_HOST
+              value: "0.0.0.0"
+            - name: ROOKERY_PORT
+              value: {{ .Values.leader.service.port | quote }}
+            - name: ROOKERY_CTX_SIZE
+              value: {{ .Values.leader.ctxSize | quote }}
+            - name: ROOKERY_N_GPU_LAYERS
+              value: {{ .Values.leader.nGpuLayers | quote }}
+            - name: ROOKERY_PARALLEL
+              value: {{ .Values.leader.parallel | quote }}
+            - name: ROOKERY_EXTRA_ARGS
+              value: {{ .Values.leader.extraArgs | quote }}
+            # Dynamic worker discovery via DNS
+            - name: ROOKERY_WORKER_SVC
+              value: "{{ include "rookery.fullname" . }}-worker.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: ROOKERY_WORKER_PORT
+              value: {{ .Values.worker.port | quote }}
+          # Override command to do DNS-based worker discovery at startup
+          command:
+            - sh
+            - -c
+            - |
+              # Resolve headless service to get individual worker pod IPs
+              echo "[rookery-leader] Discovering workers via DNS: $ROOKERY_WORKER_SVC"
+              WORKER_IPS=$(getent hosts "$ROOKERY_WORKER_SVC" 2>/dev/null | awk '{print $1}')
+
+              RPC_SERVERS=""
+              for IP in $WORKER_IPS; do
+                if [ -n "$RPC_SERVERS" ]; then
+                  RPC_SERVERS="${RPC_SERVERS},"
+                fi
+                RPC_SERVERS="${RPC_SERVERS}${IP}:${ROOKERY_WORKER_PORT}"
+              done
+
+              if [ -n "$RPC_SERVERS" ]; then
+                echo "[rookery-leader] Found workers: $RPC_SERVERS"
+                export ROOKERY_RPC_SERVERS="$RPC_SERVERS"
+              else
+                echo "[rookery-leader] No workers found, running in local-only mode"
+              fi
+
+              # Hand off to the normal entrypoint
+              exec /usr/local/bin/entrypoint.sh
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          {{- with .Values.leader.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: models
+          hostPath:
+            path: {{ .Values.model.hostPath }}
+            type: DirectoryOrCreate

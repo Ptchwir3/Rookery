@@ -1,0 +1,32 @@
+🐦 Rookery - Distributed LLM Inference
+========================================
+
+Your Rookery cluster is deploying!
+
+📡 API Endpoint:
+{{- if eq .Values.leader.service.type "NodePort" }}
+  http://<any-node-ip>:{{ .Values.leader.service.nodePort }}/v1/chat/completions
+{{- else if eq .Values.leader.service.type "ClusterIP" }}
+  http://{{ include "rookery.fullname" . }}-leader:{{ .Values.leader.service.port }}/v1/chat/completions
+  (cluster-internal only)
+{{- else }}
+  kubectl get svc {{ include "rookery.fullname" . }}-leader -o wide
+{{- end }}
+
+🧪 Test it:
+  curl http://<node-ip>:{{ default "30080" .Values.leader.service.nodePort }}/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"messages":[{"role":"user","content":"Hello!"}]}'
+
+📊 Check status:
+  kubectl get pods -l app.kubernetes.io/part-of=rookery
+  kubectl logs -l app.kubernetes.io/component=leader -f
+
+{{- if .Values.webui.enabled }}
+
+🖥️  Chat UI:
+  http://<any-node-ip>:{{ .Values.webui.service.nodePort }}
+{{- end }}
+
+📦 Model: {{ include "rookery.modelFilename" . }}
+   Stored at: {{ .Values.model.hostPath }} on the leader node

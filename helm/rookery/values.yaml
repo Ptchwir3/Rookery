@@ -1,0 +1,98 @@
+# =============================================================================
+# Rookery - Distributed LLM Inference for Kubernetes
+# =============================================================================
+
+# -- Model configuration
+model:
+  # HuggingFace URL or local path to GGUF file
+  url: "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+  # Filename to save as (auto-derived from URL if empty)
+  filename: ""
+  # Local path on the leader node where models are stored
+  hostPath: /var/lib/rookery/models
+  # Storage size for the model PV
+  storageSize: 100Gi
+
+# -- Leader (llama-server) configuration
+leader:
+  image:
+    repository: ptchwir3/rookery-leader
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Node selector for the leader pod (pin to a specific node)
+  # Example: { "kubernetes.io/hostname": "g5server" }
+  nodeSelector: {}
+  # Resource requests/limits
+  resources: {}
+  #  requests:
+  #    memory: "2Gi"
+  #    cpu: "2"
+  #  limits:
+  #    memory: "8Gi"
+  #    cpu: "4"
+  # llama-server settings
+  ctxSize: 2048
+  nGpuLayers: 0
+  parallel: 1
+  extraArgs: ""
+  # Service type: ClusterIP, NodePort, or LoadBalancer
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+
+# -- Worker (rpc-server) configuration
+worker:
+  image:
+    repository: ptchwir3/rookery-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Resource requests/limits per worker pod
+  resources: {}
+  #  requests:
+  #    memory: "1Gi"
+  #    cpu: "1"
+  #  limits:
+  #    memory: "4Gi"
+  #    cpu: "4"
+  # rpc-server settings
+  port: 50052
+  memory: 0       # 0 = use all available
+  threads: 0      # 0 = auto-detect
+  cache: false
+  # Node selector for worker pods
+  # Workers run on ALL nodes by default (DaemonSet)
+  nodeSelector: {}
+  # Tolerations (e.g., to run on ARM nodes with taints)
+  tolerations: []
+  #  - key: "arch"
+  #    operator: "Equal"
+  #    value: "arm64"
+  #    effect: "NoSchedule"
+  # Exclude the leader node from running a worker?
+  # If true, adds an anti-affinity to avoid the leader's node
+  excludeLeaderNode: false
+
+# -- Model downloader job
+downloader:
+  image:
+    repository: busybox
+    tag: "1.37"
+  # Extra wget flags (e.g., "--no-check-certificate")
+  extraFlags: ""
+
+# -- Open WebUI (optional chat frontend)
+webui:
+  enabled: false
+  image:
+    repository: ghcr.io/open-webui/open-webui
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 30300
+  # Resource requests/limits
+  resources: {}
+  # Node selector
+  nodeSelector: {}

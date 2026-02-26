@@ -1,0 +1,20 @@
+apiVersion: v2
+name: rookery
+description: >-
+  Distributed LLM inference for heterogeneous Kubernetes clusters.
+  Turns commodity hardware (Raspberry Pis, old servers) into a private
+  OpenAI-compatible LLM endpoint using llama.cpp RPC.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - llm
+  - inference
+  - distributed
+  - llama-cpp
+  - raspberry-pi
+  - arm64
+home: https://github.com/ptchwir3/rookery
+maintainers:
+  - name: Josh Nelson
+    url: https://github.com/ptchwir3

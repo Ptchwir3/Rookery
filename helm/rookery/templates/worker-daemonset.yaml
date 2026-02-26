@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "rookery.fullname" . }}-worker
+  labels:
+    {{- include "rookery.workerLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rookery.fullname" . }}-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rookery.fullname" . }}-worker
+        app.kubernetes.io/component: worker
+        {{- include "rookery.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          ports:
+            - name: rpc
+              containerPort: {{ .Values.worker.port }}
+              protocol: TCP
+          env:
+            - name: ROOKERY_HOST
+              value: "0.0.0.0"
+            - name: ROOKERY_PORT
+              value: {{ .Values.worker.port | quote }}
+            - name: ROOKERY_MEM
+              value: {{ .Values.worker.memory | quote }}
+            - name: ROOKERY_THREADS
+              value: {{ .Values.worker.threads | quote }}
+            - name: ROOKERY_CACHE
+              value: {{ .Values.worker.cache | quote }}
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: rpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: rpc
+            initialDelaySeconds: 10
+            periodSeconds: 30
