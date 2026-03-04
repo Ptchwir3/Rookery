@@ -35,6 +35,8 @@ leader:
   nGpuLayers: 0
   parallel: 1
   extraArgs: ""
+  # Seconds between worker discovery polls (0 to disable, use static workers)
+  discoveryInterval: 30
   # Service type: ClusterIP, NodePort, or LoadBalancer
   service:
     type: NodePort

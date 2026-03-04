@@ -66,9 +66,7 @@ spec:
               ATTEMPTS=0
               MAX_ATTEMPTS=60
               while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-                # nslookup returns individual pod IPs for headless service
                 WORKERS=$(nslookup "$WORKER_SVC" 2>/dev/null | grep -c "Address:")
-                # Subtract 1 for the DNS server address line
                 WORKERS=$((WORKERS - 1))
                 if [ "$WORKERS" -gt 0 ]; then
                   echo "[rookery] Found $WORKERS worker(s) ready"
@@ -81,7 +79,7 @@ spec:
               echo "[rookery] WARNING: No workers found after ${MAX_ATTEMPTS} attempts, starting anyway (local-only mode)"
               exit 0
       # ---------------------------------------------------------------
-      # Main container: llama-server
+      # Main container: llama-server with dynamic worker discovery
       # ---------------------------------------------------------------
       containers:
         - name: leader
@@ -106,37 +104,13 @@ spec:
               value: {{ .Values.leader.parallel | quote }}
             - name: ROOKERY_EXTRA_ARGS
               value: {{ .Values.leader.extraArgs | quote }}
-            # Dynamic worker discovery via DNS
+            # Dynamic worker discovery
             - name: ROOKERY_WORKER_SVC
               value: "{{ include "rookery.fullname" . }}-worker.{{ .Release.Namespace }}.svc.cluster.local"
             - name: ROOKERY_WORKER_PORT
               value: {{ .Values.worker.port | quote }}
-          # Override command to do DNS-based worker discovery at startup
-          command:
-            - sh
-            - -c
-            - |
-              # Resolve headless service to get individual worker pod IPs
-              echo "[rookery-leader] Discovering workers via DNS: $ROOKERY_WORKER_SVC"
-              WORKER_IPS=$(getent hosts "$ROOKERY_WORKER_SVC" 2>/dev/null | awk '{print $1}')
-
-              RPC_SERVERS=""
-              for IP in $WORKER_IPS; do
-                if [ -n "$RPC_SERVERS" ]; then
-                  RPC_SERVERS="${RPC_SERVERS},"
-                fi
-                RPC_SERVERS="${RPC_SERVERS}${IP}:${ROOKERY_WORKER_PORT}"
-              done
-
-              if [ -n "$RPC_SERVERS" ]; then
-                echo "[rookery-leader] Found workers: $RPC_SERVERS"
-                export ROOKERY_RPC_SERVERS="$RPC_SERVERS"
-              else
-                echo "[rookery-leader] No workers found, running in local-only mode"
-              fi
-
-              # Hand off to the normal entrypoint
-              exec /usr/local/bin/entrypoint.sh
+            - name: ROOKERY_DISCOVERY_INTERVAL
+              value: {{ .Values.leader.discoveryInterval | quote }}
           volumeMounts:
             - name: models
               mountPath: /models

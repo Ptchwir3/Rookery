@@ -77,7 +77,7 @@ WORKDIR /home/rookery
 # ---- Configuration via environment variables ----
 # Model path (required)
 ENV ROOKERY_MODEL=""
-# RPC worker addresses (comma-separated host:port)
+# RPC worker addresses (comma-separated host:port, legacy — prefer discovery)
 ENV ROOKERY_RPC_SERVERS=""
 # API listen host and port
 ENV ROOKERY_HOST="0.0.0.0"
@@ -90,6 +90,10 @@ ENV ROOKERY_N_GPU_LAYERS="0"
 ENV ROOKERY_PARALLEL="1"
 # Additional llama-server flags
 ENV ROOKERY_EXTRA_ARGS=""
+# Worker discovery (set by Helm, used by entrypoint)
+ENV ROOKERY_WORKER_SVC=""
+ENV ROOKERY_WORKER_PORT="50052"
+ENV ROOKERY_DISCOVERY_INTERVAL="30"
 
 EXPOSE 8080
 
